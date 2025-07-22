@@ -9,22 +9,16 @@ import * as Sharing from 'expo-sharing';
 import { ArrowLeft, Play, Pause, Volume2, Download, Share2, RotateCcw, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Circle as XCircle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
-// Define the interface for the analysis results
-interface AnalysisResults {
-  prediction: string;
-  confidence: number;
-  probabilities: { [key: string]: number };
-}
-
 export default function FeedbackScreen() {
   const { videoUri, results } = useLocalSearchParams();
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const videoRef = useRef<Video>(null);
   
-  const analysisResults: AnalysisResults | null = results ? JSON.parse(results as string) : null;
+  const analysisResults = results ? JSON.parse(results as string) : null;
 
   useEffect(() => {
+    // Auto-play feedback when screen loads
     if (analysisResults) {
       setTimeout(() => {
         playAudioFeedback();
@@ -118,19 +112,12 @@ export default function FeedbackScreen() {
   };
 
   const shareResults = async () => {
-    if (!analysisResults) {
-      Alert.alert('Error', 'No analysis results available to share.');
-      return;
-    }
-
     try {
       if (Platform.OS !== 'web') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
       
-      const shareText = `Javelin Analysis Result: ${analysisResults.prediction} (${Math.round(analysisResults.confidence * 100)}% confidence)\n\nProbabilities:\n${Object.entries(analysisResults.probabilities)
-        .map(([technique, prob]) => `${technique}: ${Math.round(prob * 100)}%`)
-        .join('\n')}\n\n${generateFeedbackText(analysisResults.prediction)}`;
+      const shareText = `Javelin Analysis Result: ${analysisResults.prediction} (${Math.round(analysisResults.confidence * 100)}% confidence)\n\n${generateFeedbackText(analysisResults.prediction)}`;
       
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(videoUri as string, {
@@ -156,7 +143,7 @@ export default function FeedbackScreen() {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    router.push('/preview');
+    router.back();
   };
 
   if (!analysisResults) {

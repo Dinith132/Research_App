@@ -7,20 +7,42 @@ import { Video, ResizeMode } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import { ArrowLeft, Play, Upload, RotateCcw } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import axios from 'axios';
 
 export default function PreviewScreen() {
   const { videoUri } = useLocalSearchParams();
   const [selectedVideo, setSelectedVideo] = useState<string | null>(videoUri as string || null);
   const [isLoading, setIsLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string>('');
 
   useEffect(() => {
     if (!videoUri) {
-      // If no video URI provided, open image picker
       pickVideo();
     }
   }, [videoUri]);
 
   const pickVideo = async () => {
+    if (Platform.OS === 'web') {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'video/*';
+      input.onchange = async (event: any) => {
+        const file = event.target.files[0];
+        if (file && file.size > 100 * 1024 * 1024) {
+          Alert.alert('Error', 'Video file is too large. Please select a smaller file.');
+          return;
+        }
+        if (file) {
+          const uri = URL.createObjectURL(file);
+          setSelectedVideo(uri);
+        } else {
+          router.back();
+        }
+      };
+      input.click();
+      return;
+    }
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     
     if (status !== 'granted') {
@@ -50,27 +72,89 @@ export default function PreviewScreen() {
   };
 
   const analyzeVideo = async () => {
-    if (!selectedVideo) return;
+    if (!selectedVideo) {
+      Alert.alert('Error', 'No video selected.');
+      return;
+    }
 
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
 
     setIsLoading(true);
-    
-    // Simulate analysis process
-    setTimeout(() => {
-      router.push({
-        pathname: '/processing',
-        params: { videoUri: selectedVideo }
+    setStatusMessage('Uploading video...');
+
+    try {
+      const formData = new FormData();
+      let mimeType = 'video/mp4';
+      let fileName = 'video.mp4';
+
+      if (Platform.OS === 'web') {
+        const response = await fetch(selectedVideo);
+        const blob = await response.blob();
+        
+        if (selectedVideo.endsWith('.mov')) {
+          mimeType = 'video/quicktime';
+          fileName = 'video.mov';
+        } else if (selectedVideo.endsWith('.avi')) {
+          mimeType = 'video/x-msvideo';
+          fileName = 'video.avi';
+        }
+
+        formData.append('video', blob, fileName);
+      } else {
+        if (selectedVideo.endsWith('.mov')) {
+          mimeType = 'video/quicktime';
+          fileName = 'video.mov';
+        } else if (selectedVideo.endsWith('.avi')) {
+          mimeType = 'video/x-msvideo';
+          fileName = 'video.avi';
+        }
+
+        formData.append('video', {
+          uri: Platform.OS === 'android' ? selectedVideo : selectedVideo.replace('file://', ''),
+          type: mimeType,
+          name: fileName,
+        } as any);
+      }
+
+      console.log('Uploading video:', { uri: selectedVideo, mimeType, fileName });
+
+      const response = await axios.post('http://localhost:5000/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 30000,
       });
-    }, 500);
+
+      if (response.status === 202) {
+        setStatusMessage(response.data.message);
+        Alert.alert('Success', response.data.message);
+        router.push({
+          pathname: '/processing',
+          params: { videoUri: selectedVideo, fileId: response.data.file_id, statusUrl: response.data.status_url }
+        });
+      } else {
+        throw new Error('Unexpected response status');
+      }
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      setStatusMessage('');
+      Alert.alert(
+        'Upload Failed',
+        error.response?.data?.error || error.message || 'There was an error uploading your video.',
+        [{ text: 'OK', onPress: () => {} }]
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const selectDifferentVideo = () => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    setStatusMessage('');
     pickVideo();
   };
 
@@ -116,7 +200,7 @@ export default function PreviewScreen() {
           <View style={styles.infoContainer}>
             <Text style={styles.infoTitle}>Ready for Analysis</Text>
             <Text style={styles.infoText}>
-              Our AI will analyze your javelin throw technique and provide detailed feedback on your form, arm position, and leg blocking.
+              {statusMessage || 'Our AI will analyze your javelin throw technique and provide detailed feedback on your form, arm position, and leg blocking.'}
             </Text>
           </View>
 
@@ -131,7 +215,7 @@ export default function PreviewScreen() {
                 style={styles.buttonGradient}
               >
                 <Text style={styles.primaryButtonText}>
-                  {isLoading ? 'Processing...' : 'Analyze Technique'}
+                  {isLoading ? 'Uploading...' : 'Upload and Analyze'}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
